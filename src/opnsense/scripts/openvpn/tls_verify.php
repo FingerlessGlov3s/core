@@ -2,7 +2,7 @@
 <?php
 
 /*
- * Copyright (C) 2018 Deciso B.V.
+ * Copyright (C) 2018-2023 Deciso B.V.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,31 +28,39 @@
  */
 
 require_once("config.inc");
-require_once("util.inc");
-require_once("plugins.inc.d/openvpn.inc");
 
-/* setup syslog logging */
-openlog("openvpn", LOG_ODELAY, LOG_AUTH);
-$common_name = getenv("common_name");
-$vpnid = filter_var($argv[1], FILTER_SANITIZE_NUMBER_INT);
-if (isset($config['openvpn']['openvpn-server'])) {
-    foreach ($config['openvpn']['openvpn-server'] as $server) {
-        if ("{$server['vpnid']}" === "$vpnid") {
-            $all_cso = openvpn_fetch_csc_list();
-            if (!empty($all_cso[$vpnid][$common_name])) {
-                $cso = $all_cso[$vpnid][$common_name];
-            } else {
-                $cso = array("common_name" => $common_name);
+ 
+function do_verify($serverid)
+{
+    global $config;
+    $a_server = null;
+    if (isset($config['openvpn']['openvpn-server'])) {
+        foreach ($config['openvpn']['openvpn-server'] as $server) {
+            if ($server['vpnid'] == $serverid) {
+                $a_server = $server;
+                break;
             }
-            // $argv[2] contains the temporary file used for the profile specified by client-connect
-            $cso_filename = openvpn_csc_conf_write($cso, $server, $argv[2]);
-            if (!empty($cso_filename)) {
-                syslog(LOG_NOTICE, "client config created @ {$cso_filename}");
-            }
-            break;
         }
     }
+    if ($a_server === null) {
+        return "OpenVPN '$serverid' was not found. Denying authentication for user {$username}";
+    }
+    $certificate_depth = getenv('certificate_depth') !== false ? getenv('certificate_depth'): 0;
+    $allowed_depth = !empty($a_server['cert_depth']) ? $a_server['cert_depth'] : 1;
+    if ($allowed_depth != null && ($certificate_depth > $allowed_depth)) {
+        return "Certificate depth {$certificate_depth} exceeded max allowed depth of {$allowed_depth}.";
+    }
+    return true;            
 }
 
-closelog();
-exit(0);
+openlog("openvpn", LOG_ODELAY, LOG_AUTH);
+$response = do_verify(getenv('auth_server'));
+if ($response !== true) {
+    syslog(LOG_WARNING, $response);
+    closelog();
+    exit(1);
+} else {
+    closelog();
+    exit(0);
+}
+

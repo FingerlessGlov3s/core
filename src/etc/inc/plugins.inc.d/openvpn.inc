@@ -549,20 +549,20 @@ function openvpn_reconfigure($mode, $settings, $device_only = false)
         switch ($settings['mode']) {
             case 'server_user':
             case 'server_tls_user':
-                $conf .= "client-disconnect \"/usr/local/etc/inc/plugins.inc.d/openvpn/attributes.sh {$mode_id}\"\n";
+                $conf .= "client-disconnect \"/usr/local/opnsense/scripts/openvpn/ovpn_event.py '{$vpnid}'\"\n";
                 break;
             case 'server_tls':
                 // For non user auth types setup client specific overrides,
                 // user authenticated ones are commissioned using the auth
                 // script in option auth-user-pass-verify.
-                $conf .= "client-connect \"/usr/local/etc/inc/plugins.inc.d/openvpn/ovpn_setup_cso.php {$mode_id}\"\n";
+                $conf .= "client-connect \"/usr/local/opnsense/scripts/openvpn/ovpn_event.py '{$vpnid}'\"\n";
                 break;
             case 'p2p_tls':
                 // same as server_tls, but only valid if cidr < 30, without
                 // server directive client-connect is not valid.
                 // XXX: IPv6 is likely flawed, see "server" directive too.
                 if (!empty($ip) && !empty($mask) && ($cidr < 30)) {
-                    $conf .= "client-connect \"/usr/local/etc/inc/plugins.inc.d/openvpn/ovpn_setup_cso.php {$mode_id}\"\n";
+                    $conf .= "client-connect \"/usr/local/opnsense/scripts/openvpn/ovpn_event.py '{$vpnid}'\"\n";
                 }
                 break;
             default:
@@ -663,29 +663,13 @@ function openvpn_reconfigure($mode, $settings, $device_only = false)
                 if (stristr($conf, "server-bridge") === false && empty($settings['use-common-name'])) {
                     $conf .= "username-as-common-name\n";
                 }
-                if (!empty($settings['authmode'])) {
-                    $strictusercn = "false";
-                    if ($settings['strictusercn']) {
-                        $strictusercn = "true";
-                    }
-                    $conf .= "auth-user-pass-verify \"/usr/local/etc/inc/plugins.inc.d/openvpn/ovpn_auth_verify " .
-                        "user '{$settings['authmode']}' '{$strictusercn}' '{$mode_id}'\" via-env\n";
+                if (empty($settings['authmode'])) {
+                    $conf .= "auth-user-pass-verify \"/usr/local/opnsense/scripts/openvpn/ovpn_event.py '{$vpnid}'\" via-env\n";
                 }
                 break;
         }
-        if (!isset($settings['cert_depth']) && (strstr($settings['mode'], 'tls'))) {
-            $settings['cert_depth'] = 1;
-        }
-        if (is_numeric($settings['cert_depth'])) {
-            if (($mode == 'client') && empty($settings['certref'])) {
-                $cert = "";
-            } else {
-                $cert = lookup_cert($settings['certref']);
-                /* XXX: Seems not used at all! */
-                $servercn = urlencode(cert_get_cn($cert['crt']));
-                $conf .= "tls-verify \"/usr/local/etc/inc/plugins.inc.d/openvpn/ovpn_auth_verify " .
-                    "tls '{$servercn}' {$settings['cert_depth']}\"\n";
-            }
+        if ($mode == 'server' && (strstr($settings['mode'], 'tls'))) {
+            $conf .= "tls-verify \"/usr/local/opnsense/scripts/openvpn/ovpn_event.py '{$vpnid}'\"\n";
         }
 
         // The local port to listen on
